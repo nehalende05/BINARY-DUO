@@ -149,44 +149,66 @@ kbd { font: 9px/1 var(--pixel); padding: 4px 5px 3px; color: var(--dim); backgro
   <div class="card"><p class="eyebrow" id="resultEyebrow"></p><h2 id="result"></h2><span id="badge"></span><button class="btn primary" id="next"></button></div>
 </div>
 <script id="rules">
-// Board: string of 'B' (blue) / 'r' (red), row-major, square. pin: cell index, or -1 for none.
-// Returns [blue, red] counts among the up/down/left/right neighbours of cell i.
-function votes(board, i) {
+// Board: string of colours, row-major, square: 'B' blue, 'r' red, '-' nobody (tree).
+// Types (optional, same length, '' = all plain villagers):
+//   '.' villager  copies the majority of its up/down/left/right neighbours; a tie keeps its colour
+//   'X' rebel     does the opposite of the majority
+//   'L' loudmouth its vote counts double for its neighbours
+//   'G' gossip    also listens to its 4 diagonal neighbours
+//   'S' statue    never changes, still votes, does not need to turn blue
+//   'T' tree      nobody lives here: no vote, no colour
+// pin: cell index, or -1 for none. A pinned villager keeps its colour for that turn only.
+const ORTHO = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+const ALL8 = [...ORTHO, [-1, -1], [1, -1], [-1, 1], [1, 1]];
+const fixed = (types, i) => types[i] === 'S' || types[i] === 'T';
+
+// Weighted [blue, red] votes reaching cell i.
+function votes(board, i, types = '') {
   const n = Math.sqrt(board.length), x = i % n, y = (i - x) / n;
   let b = 0, r = 0;
-  for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+  for (const [dx, dy] of types[i] === 'G' ? ALL8 : ORTHO) {
     const nx = x + dx, ny = y + dy;
     if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
-    board[ny * n + nx] === 'B' ? b++ : r++;
+    const j = ny * n + nx, w = types[j] === 'L' ? 2 : 1;
+    if (board[j] === 'B') b += w; else if (board[j] === 'r') r += w;
   }
   return [b, r];
 }
 
-function step(board, pin) {
+function step(board, pin, types = '') {
   let out = '';
   for (let i = 0; i < board.length; i++) {
-    const [b, r] = votes(board, i);
-    out += i === pin || b === r ? board[i] : b > r ? 'B' : 'r';
+    if (i === pin || fixed(types, i)) { out += board[i]; continue; }
+    const [b, r] = votes(board, i, types);
+    if (b === r) { out += board[i]; continue; }
+    const majority = b > r ? 'B' : 'r';
+    out += types[i] === 'X' ? (majority === 'B' ? 'r' : 'B') : majority;
   }
   return out;
 }
 
-const isWin = board => !board.includes('r');
+// Won when every villager who can change is blue (statues and trees don't count).
+const isWin = (board, types = '') => [...board].every((c, i) => c !== 'r' || types[i] === 'S');
 
-// Cells whose neighbours are split evenly (they keep their colour next turn).
-const tied = board => [...board].map((_, i) => { const [b, r] = votes(board, i); return b === r; });
+// Villagers whose votes are split evenly (they keep their colour next turn).
+const tied = (board, types = '') => [...board].map((_, i) => {
+  if (fixed(types, i)) return false;
+  const [b, r] = votes(board, i, types);
+  return b === r;
+});
 
 // BFS: shortest list of pins that wins within `turns`, or null.
-function solve(board, turns) {
-  if (isWin(board)) return [];
+function solve(board, turns, types = '') {
+  if (isWin(board, types)) return [];
+  const pins = [...board].map((_, i) => i).filter(i => !fixed(types, i));
   let layer = new Map([[board, []]]);
   const seen = new Set([board]);
   for (let t = 0; t < turns; t++) {
     const next = new Map();
     for (const [b, path] of layer) {
-      for (let p = 0; p < b.length; p++) {
-        const nb = step(b, p);
-        if (isWin(nb)) return [...path, p];
+      for (const p of pins) {
+        const nb = step(b, p, types);
+        if (isWin(nb, types)) return [...path, p];
         if (!seen.has(nb)) { seen.add(nb); next.set(nb, [...path, p]); }
       }
     }
@@ -195,15 +217,44 @@ function solve(board, turns) {
   return null;
 }
 
-// Run with no pins until the board repeats; true if it ever becomes all blue.
-function idleWins(board) {
+// Run with no pins until the board repeats; true if it ever wins.
+function idleWins(board, types = '') {
   const seen = new Set();
   while (!seen.has(board)) {
-    if (isWin(board)) return true;
+    if (isWin(board, types)) return true;
     seen.add(board);
-    board = step(board, -1);
+    board = step(board, -1, types);
   }
   return false;
+}
+
+// Seeded RNG (mulberry32), so a daily village is the same on every device.
+function rng(seed) {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Random village for spec { n, kinds: { X: 2, T: 1, ... } }.
+function randomLevel(spec, rand) {
+  const types = Array(spec.n * spec.n).fill('.'), free = [...types.keys()];
+  for (const [k, count] of Object.entries(spec.kinds || {}))
+    for (let c = 0; c < count; c++) types[free.splice(Math.floor(rand() * free.length), 1)[0]] = k;
+  return { types: types.join(''), board: types.map(t => (t === 'T' ? '-' : rand() < 0.5 ? 'B' : 'r')).join('') };
+}
+
+// A village whose shortest win is exactly spec.par turns and where doing nothing never wins.
+function generate(spec, rand, tries = 500) {
+  for (let t = 0; t < tries; t++) {
+    const { types, board } = randomLevel(spec, rand);
+    if (isWin(board, types) || idleWins(board, types)) continue;
+    const s = solve(board, spec.par, types); // BFS, so s is a shortest win
+    if (s && s.length === spec.par) return { types, board, par: spec.par };
+  }
+  return null;
 }
 </script>
 <script>
