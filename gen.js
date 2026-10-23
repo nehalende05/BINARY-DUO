@@ -1,70 +1,89 @@
-// Level generator (not shipped). Run: node gen.js
-// Keeps boards where doing nothing never wins and the shortest win takes exactly `turns`.
-// Ranks by fewest shortest solutions (fewer ways to win = more of a puzzle).
-const { step, isWin, idleWins } = require('./test.js');
+// Campaign generator (not shipped). Run: node gen.js, then paste the LEVELS line into index.html.
+// Every level: doing nothing never wins, the shortest win is exactly `par`, and each special
+// villager kind matters (treating it as a plain villager changes the par).
+// Ranks candidates by fewest shortest solutions (fewer ways to win = more of a puzzle).
+const { step, isWin, idleWins, solve, rng, randomLevel } = require('./test.js');
 
-// Layered BFS with path counts. Returns { depth, count, first } of the shortest win, or null.
-function analyse(board, maxTurns) {
+// Layered BFS with path counts: number of distinct shortest pin sequences, or 0.
+function countWins(board, types, turns) {
+  const pins = [...board].map((_, i) => i).filter(i => types[i] !== 'S' && types[i] !== 'T');
   let layer = new Map([[board, 1]]);
   const seen = new Set([board]);
-  for (let t = 1; t <= maxTurns; t++) {
+  for (let t = 1; t <= turns; t++) {
     const next = new Map();
     let wins = 0;
     for (const [b, c] of layer)
-      for (let p = 0; p < b.length; p++) {
-        const nb = step(b, p);
-        if (isWin(nb)) wins += c;
+      for (const p of pins) {
+        const nb = step(b, p, types);
+        if (isWin(nb, types)) wins += c;
         else if (!seen.has(nb) || next.has(nb)) next.set(nb, (next.get(nb) || 0) + c);
       }
-    if (wins) return { depth: t, count: wins };
+    if (wins) return wins;
     for (const b of next.keys()) seen.add(b);
     layer = next;
   }
-  return null;
+  return 0;
 }
 
-// All shortest pin sequences (only used on the chosen boards, so brute force is fine).
-function solutions(board, turns, path = []) {
-  if (path.length === turns) return isWin(board) ? [path] : [];
-  if (isWin(board)) return [];
-  return [...Array(board.length).keys()].flatMap(p => solutions(step(board, p), turns, [...path, p]));
+function mechanicsMatter(board, types, par) {
+  return [...new Set(types.replace(/[.ST]/g, ''))].every(k => {
+    const s = solve(board, par + 1, types.split(k).join('.'));
+    return !s || s.length !== par;
+  });
 }
 
-let seed = 1;
-const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-const randomBoard = n => Array.from({ length: n * n }, () => (rand() < 0.5 ? 'B' : 'r')).join('');
-const allBoards = n => Array.from({ length: 2 ** (n * n) }, (_, k) => [...Array(n * n)].map((_, i) => (k >> i) & 1 ? 'B' : 'r').join(''));
+const CAMPAIGN = [
+  // [chapter, name, spec or fixed board, turn limit slack]
+  ['Hat Trick', 'First Pin', { fixed: ['.........', 'rBrrBrBBB'], par: 2 }, 0],
+  ['Hat Trick', 'Change of Heart', { fixed: ['.........', 'BBBrBrBrB'], par: 2 }, 0],
+  ['Hat Trick', 'Even Split', { fixed: ['.........', 'BBrBrBrrB'], par: 3 }, 0],
+  ['Hat Trick', 'Market Square', { n: 4, par: 3 }, 1],
+  ['Into the Woods', 'Clearing', { n: 4, par: 2, kinds: { T: 3 } }, 1],
+  ['Into the Woods', 'Orchard', { n: 5, par: 3, kinds: { T: 6 } }, 1],
+  ['Stone Cold', 'Old Statue', { n: 4, par: 3, kinds: { S: 2 } }, 1],
+  ['Stone Cold', 'Monument Park', { n: 5, par: 3, kinds: { S: 3, T: 2 } }, 1],
+  ['Rebels', 'Contrarian', { n: 3, par: 2, kinds: { X: 1 } }, 1],
+  ['Rebels', 'Punk Rock', { n: 4, par: 3, kinds: { X: 2 } }, 1],
+  ['Rebels', 'Riot in the Pines', { n: 5, par: 4, kinds: { X: 2, T: 3 } }, 1],
+  ['Loudmouths', 'Megaphone', { n: 4, par: 3, kinds: { L: 1 } }, 1],
+  ['Loudmouths', 'Town Crier', { n: 5, par: 3, kinds: { L: 2, S: 1 } }, 1],
+  ['Gossips', 'Over the Fence', { n: 4, par: 3, kinds: { G: 2 } }, 1],
+  ['Gossips', 'Grapevine', { n: 5, par: 4, kinds: { G: 2, X: 1, T: 2 } }, 1],
+  ['Finale', 'Peer Pressure', { n: 5, par: 4, kinds: { X: 1, L: 1, G: 1, S: 1, T: 2 }, tries: 5000 }, 1],
+];
 
-function candidates(n, turns, pool, extra = () => true) {
-  const out = [];
-  for (const b of new Set(pool)) {
-    if (idleWins(b)) continue;
-    const a = analyse(b, turns);
-    if (a && a.depth === turns && extra(b)) out.push({ board: b, count: a.count });
-  }
-  return out.sort((x, y) => x.count - y.count || (x.board < y.board ? -1 : 1));
-}
-
-const show = (b, n) => b.match(new RegExp(`.{${n}}`, 'g')).join(' / ');
+const rand = rng(2026);
+const show = (s, n) => s.match(new RegExp(`.{${n}}`, 'g')).join(' / ');
 const levels = [];
-function pick(name, n, turns, pool, extra) {
+for (const [chapter, name, spec, slack] of CAMPAIGN) {
   const t0 = Date.now();
-  const c = candidates(n, turns, pool, b => !levels.includes(b) && (!extra || extra(b)));
-  if (!c.length) throw new Error(`${name}: no board found`);
-  const { board, count } = c[0];
-  levels.push(board);
-  const sols = solutions(board, turns);
-  console.log(`${name} ${n}x${n} in ${turns}: ${show(board, n)}  (${c.length} candidates, ${count} winning sequences, ${Date.now() - t0}ms)`);
-  for (const s of sols) console.log(`   pins (row,col): ${s.map(p => `(${(p / n) | 0},${p % n})`).join(" -> ")}`);
-  return sols;
+  let pick;
+  if (spec.fixed) {
+    const [types, board] = spec.fixed;
+    pick = { types, board, count: countWins(board, types, spec.par) };
+  } else {
+    const found = [];
+    for (let k = 0; k < (spec.tries || (spec.n === 5 ? 500 : 1500)); k++) {
+      const { types, board } = randomLevel(spec, rand);
+      if (isWin(board, types) || idleWins(board, types)) continue;
+      const s = solve(board, spec.par, types);
+      if (!s || s.length !== spec.par || !mechanicsMatter(board, types, spec.par)) continue;
+      if (levels.some(l => l[2] === board)) continue;
+      found.push({ types, board, count: countWins(board, types, spec.par), distinct: new Set(s).size });
+    }
+    // fewest ways to win, then most varied solution (pinning one cell every turn is dull)
+    found.sort((a, b) => a.count - b.count || b.distinct - a.distinct || (a.board < b.board ? -1 : 1));
+    pick = found[0];
+    if (!pick) throw new Error(`${name}: no board found`);
+    pick.candidates = found.length;
+  }
+  const { types, board } = pick, n = Math.sqrt(board.length);
+  // Re-check the shipped guarantees independently of the search above.
+  const best = solve(board, spec.par, types);
+  if (!best || best.length !== spec.par || solve(board, spec.par - 1, types) || idleWins(board, types)) throw new Error(`${name}: check failed`);
+  levels.push([chapter, name, types, board, spec.par, spec.par + slack]);
+  console.log(`${levels.length}. ${name} (${chapter}) ${n}x${n} par ${spec.par} limit ${spec.par + slack}  [${pick.count} shortest wins, ${pick.candidates ?? 'fixed'} candidates, ${Date.now() - t0}ms]`);
+  console.log(`   types  ${show(types, n)}\n   board  ${show(board, n)}`);
+  console.log(`   e.g. pins (row,col): ${best.map(p => `(${(p / n) | 0},${p % n})`).join(' -> ')}`);
 }
-
-pick('L1', 3, 2, ['rBrrBrBBB']); // the PRD's level 1
-// L2: the pin must move between turn 1 and turn 2 in every solution.
-pick('L2', 3, 2, allBoards(3), b => solutions(b, 2).every(([a, c]) => a !== c));
-pick('L3', 3, 3, allBoards(3));
-const pool4 = Array.from({ length: 3000 }, () => randomBoard(4));
-pick('L4', 4, 3, pool4);
-pick('L5', 4, 3, pool4);
-pick('L6', 5, 4, Array.from({ length: 150 }, () => randomBoard(5)));
-console.log('\nconst LEVELS = ' + JSON.stringify(levels.map((b, i) => [b, [2, 2, 3, 3, 3, 4][i]])) + ';');
+console.log('\nconst LEVELS = ' + JSON.stringify(levels) + ';');
