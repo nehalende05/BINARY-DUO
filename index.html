@@ -134,7 +134,7 @@ body[data-screen="menu"] #menu, body[data-screen="select"] #select, body[data-sc
 .frame { position: relative; padding: 10px; background: var(--wood); width: min(calc(100% - 8px), 440px, max(260px, calc(100svh - 400px)));
   --glow: inset 3px 3px 0 var(--wood-hi), inset -3px -3px 0 var(--wood-dark), 0 calc(var(--px) + 8px) 0 var(--drop); }
 #board { display: grid; gap: 4px; padding: 4px; background: var(--soil); }
-.cell { position: relative; aspect-ratio: 1; border: 0; padding: 10%; background: var(--grass); cursor: pointer; image-rendering: pixelated; }
+.cell { position: relative; aspect-ratio: 1; min-width: 0; min-height: 0; border: 0; padding: 10%; background: var(--grass); cursor: pointer; image-rendering: pixelated; }
 .cell:not(:disabled):hover { filter: brightness(1.12); }
 .cell:disabled { cursor: default; }
 .cell:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
@@ -843,7 +843,7 @@ function play(l) {
 
 function build() {
   const n = Math.sqrt(lvl.board.length);
-  $('board').style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+  $('board').style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`; // minmax(0, …): columns never grow past the frame
   $('board').innerHTML = '';
   cells = [...lvl.board].map((_, i) => {
     const c = document.createElement('button');
