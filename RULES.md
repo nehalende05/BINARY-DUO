@@ -90,6 +90,7 @@ Every campaign level was generated and checked by a solver. Doing nothing never 
 | Restart | Restart button | Restart button | `R` |
 | Hint (costs the No hint star) | Hint button | Hint button | `H` |
 | Close a card | Got it | Got it | `Esc` |
+| Pause the animated scenery | Pause button (top right) | Pause button | Tab to it, then `Enter` |
 
 The preview shows a small picture in the corner of every villager who would change, so you can see their next look before you commit. Progress is saved in this browser.
 

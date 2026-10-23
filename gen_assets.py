@@ -64,13 +64,18 @@ def person(kind, colour):
 
 
 def tile():
+    """Grass floor tile: speckles and little tufts, lit top-left edge, shaded bottom-right edge."""
     rnd = random.Random(7)
-    im = Image.new('RGBA', (16, 16), '#1a1b22')
-    for _ in range(14):
-        im.putpixel((rnd.randrange(1, 15), rnd.randrange(1, 15)), (0x22, 0x24, 0x2d, 255))
+    im = Image.new('RGBA', (16, 16), '#8bd45e')
+    for _ in range(16):
+        im.putpixel((rnd.randrange(1, 15), rnd.randrange(1, 15)), ImageColor.getrgb(rnd.choice(['#7cc94f', '#a3e070'])) + (255,))
+    for _ in range(4):
+        x, y = rnd.randrange(2, 13), rnd.randrange(3, 14)
+        for dx, dy in [(0, 0), (1, -1), (2, 0)]:
+            im.putpixel((x + dx, y + dy), ImageColor.getrgb('#5fae3f') + (255,))
     for i in range(16):
-        im.putpixel((i, 0), (0x26, 0x28, 0x33, 255)); im.putpixel((0, i), (0x26, 0x28, 0x33, 255))
-        im.putpixel((i, 15), (0x10, 0x11, 0x16, 255)); im.putpixel((15, i), (0x10, 0x11, 0x16, 255))
+        im.putpixel((i, 0), (0x9f, 0xe0, 0x6e, 255)); im.putpixel((0, i), (0x9f, 0xe0, 0x6e, 255))
+        im.putpixel((i, 15), (0x6f, 0xbd, 0x47, 255)); im.putpixel((15, i), (0x6f, 0xbd, 0x47, 255))
     return im
 
 
